@@ -82,9 +82,11 @@ class SystemStressApp:
 
         # Disk
         if self.stress_disk.get():
-            p = mp.Process(target=disk_worker, args=(self.stop_event,), daemon=True)
-            p.start()
-            self.processes.append(p)
+            for i in range(8):  # número de workers de disco
+                file_path = f"disk_stress_{i}.tmp"
+                p = mp.Process(target=disk_worker, args=(self.stop_event, file_path), daemon=True)
+                p.start()
+                self.processes.append(p)
 
         # Agenda término automático
         self.root.after(duration * 1000, self.stop_test)
