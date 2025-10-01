@@ -16,23 +16,30 @@ Disco: escreve/lê dados aleatórios em arquivo grande.
 '''
 
 
-def cpu_overclock_worker(stop_event: mp.Event, worker_id: int):
-    """
-    Estressa CPU com algoritmo determinístico e validação de overclock.
-    Usa Lucas-Lehmer simplificado para detectar instabilidade.
+def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
+    """Estressa CPU fortemente e valida resultados numéricos"""
+    rng = np.random.default_rng(worker_id)
+    size = 1024  
+    A = rng.random((size, size), dtype=np.float64)
+    B = rng.random((size, size), dtype=np.float64)
 
-    """
-    p = 31  # número primo Mersenne pequeno para teste rápido
-    m = (1 << p) - 1
-    s = 4 + worker_id  # valor inicial diferente por worker
+    expected_checksum = int(np.sum(A @ B))  # soma inteira aproximada
 
     while not stop_event.is_set():
-        for _ in range(1000):  # loop pesado
-            s = (s * s - 2) % m
+        # repete várias multiplicações no mesmo loop
+        for _ in range(5):
+            C = A @ B
+            checksum = int(np.sum(C))
 
-        # validação determinística
-        if s <= 0 or s >= m or not math.isfinite(s): #detectar overclock (ex.: valores inesperados
-            raise RuntimeError(f"[Worker {worker_id}] Instabilidade detectada!")
+            # cálculos extras para estressar FPU e ALU
+            _ = np.sin(C).sum() + np.cos(C).sum()
+            hashlib.sha256(C.tobytes()).digest()
+
+            if checksum != expected_checksum:
+                raise RuntimeError(
+                    f"[Worker {worker_id}] Instabilidade detectada! "
+                    f"{checksum} != {expected_checksum}"
+                )
 
 
 

@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import multiprocessing as mp
-from workers import cpu_overclock_worker, ram_stress_worker, disk_worker
+from workers import cpu_burn_worker, ram_stress_worker, disk_worker
 
 class SystemStressApp:
     def __init__(self, root):
@@ -65,7 +65,7 @@ class SystemStressApp:
         # CPU: um worker por núcleo
         if self.stress_cpu.get():
             for i in range(mp.cpu_count()):
-                p = mp.Process(target=cpu_overclock_worker, args=(self.stop_event, i), daemon=True)
+                p = mp.Process(target=cpu_burn_worker, args=(self.stop_event, i), daemon=True)
                 p.start()
                 self.processes.append(p)
 
