@@ -7,26 +7,42 @@ import random
 import numpy as np
 
 def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
-    """Estressa CPU fortemente e valida resultados numéricos
-     Multiplica matrizes grandes repetidamente e checa se o resultado é consistente.
+    """
+ 
+    - Multiplicar matrizes grandes repetidamente
+    - Verificar se o resultado é sempre o mesmo (overclock)
+    - Fazer operações trigonométricas e hashing para diversificar o tipo de carga.
     """
     rng = np.random.default_rng(worker_id)
+
+    # Tamanho das matrizes (1024x1024 = 1 milhão de elementos)
     size = 1024  
     A = rng.random((size, size), dtype=np.float64)
     B = rng.random((size, size), dtype=np.float64)
 
-    expected_checksum = int(np.sum(A @ B))  # soma inteira aproximada
+    # Calcula o "checksum" esperado, que é a soma de todos os elementos do produto A @ B
+    expected_checksum = int(np.sum(A @ B))
 
     while not stop_event.is_set():
-        # repete várias multiplicações no mesmo loop
+
+        # Executa várias multiplicações no mesmo ciclo
         for _ in range(5):
+
+            # Multiplicação de matrizes — operação intensiva de ponto flutuante
             C = A @ B
+
+            # Soma dos resultados para validar a consistência numérica
             checksum = int(np.sum(C))
 
-            # cálculos extras para estressar FPU e ALU
+            # Cálculos extras com seno e cosseno:
             _ = np.sin(C).sum() + np.cos(C).sum()
+
+            # Gera um hash SHA-256 dos bytes da matriz C
+            # Isso força movimentação de memória
             hashlib.sha256(C.tobytes()).digest()
 
+            # Validação de estabilidade:
+            # Se o resultado da multiplicação mudar, pode indicar instabilidade
             if checksum != expected_checksum:
                 raise RuntimeError(
                     f"[Worker {worker_id}] Instabilidade detectada! "
@@ -34,31 +50,47 @@ def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
                 )
 
 
-
 def disk_worker(stop_event: mp.Event, file_path="disk_stress.tmp", block_size=4096):
-    """Estressa Disco com escrita/leitura em posições aleatórias
-    Gera acessos aleatórios de escrita e leitura em um arquivo grande para testar velocidade e integridade do disco.
+    """
+    Estressa o Disco com operações aleatórias de leitura e escrita.
+
+    - Realiza acessos aleatórios de escrita e leitura para simular I/O pesado.
+    - Valida a integridade dos dados após a escrita.
     """
     size = 1024 * 1024 * 1024  # 1 GB
-    # se o arquivo não existir, cria um arquivo grande
-    if not os.path.exists(file_path):
-        with open(file_path, "wb") as f:
-            f.write(b"\0" * size)
-   # abre o arquivo para leitura/escrita binária
-    with open(file_path, "r+b") as f:
-        while not stop_event.is_set():
-            pos = random.randint(0, size - block_size)
-            data = os.urandom(block_size)
-            f.seek(pos)
-            f.write(data)
-            #força o flush para garantir escrita no disco
-            f.flush()
-            os.fsync(f.fileno())
 
-            # leitura de validação
-            f.seek(pos)
-            read_back = f.read(block_size)
-            assert read_back == data
+    # Cria o arquivo se não existir
+    if not os.path.exists(file_path):
+        print(f"[INFO] Criando arquivo de {size / (1024**3):.1f} GB para teste...")
+        with open(file_path, "wb") as f:
+            chunk = b"\0" * (1024 * 1024)  # escreve em blocos de 1MB para não travar
+            for _ in range(size // len(chunk)):
+                f.write(chunk)
+        print("[INFO] Arquivo de teste criado.")
+
+    # Abre o arquivo para leitura/escrita binária
+    with open(file_path, "r+b", buffering=0) as f:  # buffering=0 -> acesso direto
+        while not stop_event.is_set():
+            try:
+                # Escolhe uma posição aleatória dentro do arquivo
+                pos = random.randint(0, size - block_size)
+
+                # Gera dados aleatórios e grava
+                data = os.urandom(block_size)
+                f.seek(pos)
+                f.write(data)
+                
+                # Força a escrita no disco (fsync = garante que foi para o hardware)
+                f.flush()
+                os.fsync(f.fileno())
+
+                # Leitura de volta para validação
+                f.seek(pos)
+                read_back = f.read(block_size)
+                if read_back != data:
+                    print(f"[ERRO] Falha na validação em posição {pos}")
+            except Exception as e:
+                print(f"[ERRO] {e}")
 
 def ram_stress_worker(stop_event, block_size_mb=500, num_blocks=20, page_size=4096):
     """
