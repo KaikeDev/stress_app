@@ -6,16 +6,6 @@ import os
 import random
 import numpy as np
 
-'''
-CPU: faz cálculos intensivos + detecta erros de instabilidade.
-
-RAM: aloca muita memória e acessa aleatoriamente.
-
-Disco: escreve/lê dados aleatórios em arquivo grande.
-
-'''
-
-
 def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
     """Estressa CPU fortemente e valida resultados numéricos
      Multiplica matrizes grandes repetidamente e checa se o resultado é consistente.
@@ -119,8 +109,6 @@ def ram_stress_worker(stop_event, block_size_mb=500, num_blocks=20, page_size=40
             elapsed = time.time() - start_time
             print(f"[RAM] {ops:,} acessos aleatórios em {elapsed:.1f}s "
                   f"({ops/elapsed:,.0f} ops/s)")
-
-    print("[RAM] Teste encerrado. Verificando integridade...")
 
     # revalida checksums (detecção de corrupção)
     new_checksums = [sum(b[:1024]) for b in blocks]
