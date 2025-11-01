@@ -17,7 +17,9 @@ Disco: escreve/lê dados aleatórios em arquivo grande.
 
 
 def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
-    """Estressa CPU fortemente e valida resultados numéricos"""
+    """Estressa CPU fortemente e valida resultados numéricos
+     Multiplica matrizes grandes repetidamente e checa se o resultado é consistente.
+    """
     rng = np.random.default_rng(worker_id)
     size = 1024  
     A = rng.random((size, size), dtype=np.float64)
@@ -44,7 +46,9 @@ def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
 
 
 def disk_worker(stop_event: mp.Event, file_path="disk_stress.tmp", block_size=4096):
-    """Estressa Disco com escrita/leitura em posições aleatórias"""
+    """Estressa Disco com escrita/leitura em posições aleatórias
+    Gera acessos aleatórios de escrita e leitura em um arquivo grande para testar velocidade e integridade do disco.
+    """
     size = 1024 * 1024 * 1024  # 1 GB
     # se o arquivo não existir, cria um arquivo grande
     if not os.path.exists(file_path):
@@ -73,6 +77,8 @@ def ram_stress_worker(stop_event: mp.Event, block_size_mb=500, num_blocks=20):
     - num_blocks: número de blocos alocados
 
     aloca vários blocos grandes (ex.: bytearray) e faz acessos aleatórios de leitura/escrita em posições aleatórias
+
+     Cria e manipula grandes quantidades de memória de forma aleatória, para testar uso intensivo da RAM e cache.
     """
     blocks = [bytearray(block_size_mb * 1024 * 1024) for _ in range(num_blocks)]
     sizes = [len(b) for b in blocks]
