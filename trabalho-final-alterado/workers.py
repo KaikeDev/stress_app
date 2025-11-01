@@ -70,26 +70,61 @@ def disk_worker(stop_event: mp.Event, file_path="disk_stress.tmp", block_size=40
             read_back = f.read(block_size)
             assert read_back == data
 
-def ram_stress_worker(stop_event: mp.Event, block_size_mb=500, num_blocks=20):
+def ram_stress_worker(stop_event, block_size_mb=500, num_blocks=20, page_size=4096):
     """
-    Estressa RAM usando vários blocos grandes e acesso aleatório.
-    - block_size_mb: tamanho de cada bloco em MB
-    - num_blocks: número de blocos alocados
-
-    aloca vários blocos grandes (ex.: bytearray) e faz acessos aleatórios de leitura/escrita em posições aleatórias
-
-     Cria e manipula grandes quantidades de memória de forma aleatória, para testar uso intensivo da RAM e cache.
+    Estressa a RAM através de leitura e escrita aleatória em blocos grandes.
+    
+    - Aloca grandes blocos de memória (bytearrays).
+    - Acessa endereços aleatórios alinhados a cache line / página.
+    - Faz leituras e escritas pseudoaleatórias para causar page faults.
     """
-    blocks = [bytearray(block_size_mb * 1024 * 1024) for _ in range(num_blocks)]
-    sizes = [len(b) for b in blocks]
+    block_size_bytes = block_size_mb * 1024 * 1024
+    total_allocated = block_size_bytes * num_blocks / (1024 * 1024)
+    blocks = [bytearray(block_size_bytes) for _ in range(num_blocks)]
 
-    print(f"[RAM] Alocados {num_blocks} blocos de {block_size_mb} MB = {block_size_mb*num_blocks} MB")
+    print(f"[RAM] Alocados {num_blocks} blocos de {block_size_mb} MB = {total_allocated:.1f} MB totais")
+
+    # pequenas verificações iniciais (checksum parcial)
+    checksums = [sum(b[:1024]) for b in blocks]
+
+    # contadores para estatísticas
+    ops = 0
+    start_time = time.time()
 
     while not stop_event.is_set():
-        # escolhe bloco e posição aleatória
-        i = random.randint(0, num_blocks - 1)
-        pos = random.randint(0, sizes[i] - 1)
-        val = (blocks[i][pos] + 1) % 256
-        blocks[i][pos] = val  # escreve
-        _ = blocks[i][pos]    # lê para validar
+        # Escolhe bloco aleatório
+        i = random.randrange(num_blocks)
+        b = blocks[i]
 
+        # Escolhe posição alinhada à página (multiplo de page_size)
+        max_offset = len(b) - page_size
+        offset = (random.randrange(max_offset // page_size) * page_size)
+
+        # Lê um pedaço (cache line / página)
+        chunk = memoryview(b)[offset:offset+64]  # leitura leve (64 bytes)
+        checksum = sum(chunk)
+
+        # Escrita pseudoaleatória: altera 1 byte
+        pos = offset + random.randint(0, 63)
+        new_val = (b[pos] + checksum) & 0xFF
+        b[pos] = new_val
+
+        # Validação simples: lê de volta
+        _ = b[pos]
+
+        ops += 1
+
+        # imprime de tempos em tempos
+        if ops % 1_000_000 == 0:
+            elapsed = time.time() - start_time
+            print(f"[RAM] {ops:,} acessos aleatórios em {elapsed:.1f}s "
+                  f"({ops/elapsed:,.0f} ops/s)")
+
+    print("[RAM] Teste encerrado. Verificando integridade...")
+
+    # revalida checksums (detecção de corrupção)
+    new_checksums = [sum(b[:1024]) for b in blocks]
+    for i, (old, new) in enumerate(zip(checksums, new_checksums)):
+        if old != new:
+            print(f"[RAM][ALERTA] Possível corrupção detectada no bloco {i}: "
+                  f"{old} -> {new}")
