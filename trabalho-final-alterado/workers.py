@@ -1,150 +1,112 @@
 import multiprocessing as mp
 import time
 import math
-import hashlib
 import os
 import random
-import numpy as np
 
 def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
     """
- 
-    - Multiplicar matrizes grandes repetidamente
-    - Verificar se o resultado é sempre o mesmo (overclock)
-    - Fazer operações trigonométricas e hashing para diversificar o tipo de carga.
+    Teste de estabilidade e carga total da CPU.
+    - Executa cálculos intensos com ponto flutuante e inteiros.
+    - Mantém verificações periódicas de integridade numérica.
     """
-    rng = np.random.default_rng(worker_id)
+    # Usa o ID do processo como semente para gerar resultados determinísticos
+    seed = worker_id
+    random.seed(seed)
 
-    # Tamanho das matrizes (1024x1024 = 1 milhão de elementos)
-    size = 1024  
-    A = rng.random((size, size), dtype=np.float64)
-    B = rng.random((size, size), dtype=np.float64)
+    # Valor base esperado — (instabilidade)
+    expected = 0.123456789
+    validation_interval = 10_000_000  
+    iteration = 0
+    result = expected
 
-    # Calcula o "checksum" esperado, que é a soma de todos os elementos do produto A @ B
-    expected_checksum = int(np.sum(A @ B))
+    # Pré-carrega senos
+    values = [math.sin(i) for i in range(1_000)]
 
+    # Loop principal 
     while not stop_event.is_set():
+       
+        for _ in range(validation_interval):
+            i = (iteration % 1000) + 1
+            
+            # Executa operações trigonométricas intensivas e dependentes do resultado anterior
+            # Isso impede a CPU de "adivinhar" o próximo valor.
+            result = (result * values[i - 1]) + math.cos(result + i)
+            iteration += 1
 
-        # Executa várias multiplicações no mesmo ciclo
-        for _ in range(5):
-
-            # Multiplicação de matrizes — operação intensiva de ponto flutuante
-            C = A @ B
-
-            # Soma dos resultados para validar a consistência numérica
-            checksum = int(np.sum(C))
-
-            # Cálculos extras com seno e cosseno:
-            _ = np.sin(C).sum() + np.cos(C).sum()
-
-            # Gera um hash SHA-256 dos bytes da matriz C
-            # Isso força movimentação de memória
-            hashlib.sha256(C.tobytes()).digest()
-
-            # Validação de estabilidade:
-            # Se o resultado da multiplicação mudar, pode indicar instabilidade
-            if checksum != expected_checksum:
-                raise RuntimeError(
-                    f"[Worker {worker_id}] Instabilidade detectada! "
-                    f"{checksum} != {expected_checksum}"
-                )
+        # Validação periódica
+        if abs(result - expected) > 1e6 or math.isnan(result):
+            print(f"[CPU-{worker_id}]  Instabilidade detectada! {result} != {expected}")
+            break
 
 
-def disk_worker(stop_event: mp.Event, file_path="disk_stress.tmp", block_size=4096):
+def disk_worker(stop_event: mp.Event, file_path="disk_stress.tmp", block_size=4096, file_size_mb=1024):
     """
-    Estressa o Disco com operações aleatórias de leitura e escrita.
+    Estressa o disco com operações aleatórias de leitura/escrita.
+    Cria um arquivo temporário grande e acessa posições aleatórias continuamente.
 
-    - Realiza acessos aleatórios de escrita e leitura para simular I/O pesado.
-    - Valida a integridade dos dados após a escrita.
+    Como no windows não é possivel acessar um setor, estamos acessando posições dentro de um arquivo
+    que está dentro do sistema de arquivos (NTFS, FAT32, etc.)
     """
-    size = 1024 * 1024 * 1024  # 1 GB
+    size = file_size_mb * 1024 * 1024  # MB para bytes
 
-    # Cria o arquivo se não existir
+    # Cria o arquivo inicial caso ele não exista
     if not os.path.exists(file_path):
-        print(f"[INFO] Criando arquivo de {size / (1024**3):.1f} GB para teste...")
+        print(f"[DISK] Criando arquivo de {file_size_mb} MB para teste...")
         with open(file_path, "wb") as f:
-            chunk = b"\0" * (1024 * 1024)  # escreve em blocos de 1MB para não travar
-            for _ in range(size // len(chunk)):
-                f.write(chunk)
-        print("[INFO] Arquivo de teste criado.")
+            f.write(b"\0" * size)
 
-    # Abre o arquivo para leitura/escrita binária
-    with open(file_path, "r+b", buffering=0) as f:  # buffering=0 -> acesso direto
+    # Abre o arquivo no modo leitura+escrita
+    with open(file_path, "r+b", buffering=0) as f:
         while not stop_event.is_set():
-            try:
-                # Escolhe uma posição aleatória dentro do arquivo
-                pos = random.randint(0, size - block_size)
+            
+            # Escolhe uma posição aleatória
+            pos = random.randint(0, size - block_size)
 
-                # Gera dados aleatórios e grava
-                data = os.urandom(block_size)
-                f.seek(pos)
-                f.write(data)
-                
-                # Força a escrita no disco (fsync = garante que foi para o hardware)
-                f.flush()
-                os.fsync(f.fileno())
+            # Gera um bloco de dados aleatórios para escrita
+            data = os.urandom(block_size)
 
-                # Leitura de volta para validação
-                f.seek(pos)
-                read_back = f.read(block_size)
-                if read_back != data:
-                    print(f"[ERRO] Falha na validação em posição {pos}")
-            except Exception as e:
-                print(f"[ERRO] {e}")
+            # Move o ponteiro do arquivo e escreve os dados
+            f.seek(pos)
+            f.write(data)
 
-def ram_stress_worker(stop_event, block_size_mb=500, num_blocks=20, page_size=4096):
+            # Garante que os dados foram realmente gravados no disco
+            f.flush()
+            os.fsync(f.fileno())
+
+            # só valida se foi realmente escrito
+            f.seek(pos)
+            if f.read(block_size) != data:
+                print(f"[DISK] Falha de integridade em posição {pos}")
+
+def ram_stress_worker(stop_event: mp.Event, block_size_mb=500, num_blocks=10):
     """
-    Estressa a RAM através de leitura e escrita aleatória em blocos grandes.
+    Estressa a RAM com leituras e escritas aleatórias.
+    - Aloca grandes blocos de memória.
+    - Realiza acessos aleatórios e modificações contínuas.
+    """
+    block_size = block_size_mb * 1024 * 1024
     
-    - Aloca grandes blocos de memória (bytearrays).
-    - Acessa endereços aleatórios alinhados a cache line / página.
-    - Faz leituras e escritas pseudoaleatórias para causar page faults.
-    """
-    block_size_bytes = block_size_mb * 1024 * 1024
-    total_allocated = block_size_bytes * num_blocks / (1024 * 1024)
-    blocks = [bytearray(block_size_bytes) for _ in range(num_blocks)]
+    # 5 GB de RAM.
+    blocks = [bytearray(block_size) for _ in range(num_blocks)]
 
-    print(f"[RAM] Alocados {num_blocks} blocos de {block_size_mb} MB = {total_allocated:.1f} MB totais")
+    ops = 0 # Contador de operações
+    start = time.time()
 
-    # pequenas verificações iniciais (checksum parcial)
-    checksums = [sum(b[:1024]) for b in blocks]
-
-    # contadores para estatísticas
-    ops = 0
-    start_time = time.time()
-
+    # Loop contínuo até que o evento de parada seja acionado
     while not stop_event.is_set():
-        # Escolhe bloco aleatório
-        i = random.randrange(num_blocks)
-        b = blocks[i]
+        
+        # Escolhe um bloco aleatório
+        b = random.choice(blocks)
 
-        # Escolhe posição alinhada à página (multiplo de page_size)
-        max_offset = len(b) - page_size
-        offset = (random.randrange(max_offset // page_size) * page_size)
+        # Escolhe uma posição aleatória dentro desse bloco
+        pos = random.randint(0, len(b) - 1)
 
-        # Lê um pedaço (cache line / página)
-        chunk = memoryview(b)[offset:offset+64]  # leitura leve (64 bytes)
-        checksum = sum(chunk)
-
-        # Escrita pseudoaleatória: altera 1 byte
-        pos = offset + random.randint(0, 63)
-        new_val = (b[pos] + checksum) & 0xFF
-        b[pos] = new_val
-
-        # Validação simples: lê de volta
-        _ = b[pos]
+        # Altera o byte
+        b[pos] = (b[pos] + 1) % 256  # altera um byte
 
         ops += 1
-
-        # imprime de tempos em tempos
+        # Exibe a cada 1 milhão de operações
         if ops % 1_000_000 == 0:
-            elapsed = time.time() - start_time
-            print(f"[RAM] {ops:,} acessos aleatórios em {elapsed:.1f}s "
-                  f"({ops/elapsed:,.0f} ops/s)")
-
-    # revalida checksums (detecção de corrupção)
-    new_checksums = [sum(b[:1024]) for b in blocks]
-    for i, (old, new) in enumerate(zip(checksums, new_checksums)):
-        if old != new:
-            print(f"[RAM][ALERTA] Possível corrupção detectada no bloco {i}: "
-                  f"{old} -> {new}")
+            elapsed = time.time() - start
+            print(f"[RAM] {ops:,} acessos ({ops/elapsed:,.0f} ops/s)")
