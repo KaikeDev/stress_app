@@ -2,6 +2,18 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import multiprocessing as mp
 from workers import cpu_burn_worker, ram_stress_worker, disk_worker
+import threading
+import time
+
+# Importar monitor de temperatura
+try:
+    from temperatures import MonitorCPU
+
+    TEMP_AVAILABLE = True
+except Exception as e:
+    TEMP_AVAILABLE = False
+    print(f"⚠️ Monitor de temperatura não disponível: {e}")
+
 
 class SystemStressApp:
     def __init__(self, root):
@@ -16,13 +28,60 @@ class SystemStressApp:
         self.stress_disk = tk.BooleanVar(value=False)
         self.status_text = tk.StringVar(value="Idle")
         self.time_left = tk.StringVar(value="Time left: 00:00:00")
+        self.cpu_temp = tk.StringVar(value="CPU Temp: --°C")
 
         self.stop_event = None
         self.processes = []
         self.remaining = 0
         self.running = False
 
+        # Monitor de temperatura
+        self.temp_monitor = None
+        self.temp_thread = None
+        self.temp_running = False
+
         self.build_ui()
+
+        # Inicializar monitor de temperatura
+        if TEMP_AVAILABLE:
+            self.init_temp_monitor()
+
+    def init_temp_monitor(self):
+        """Inicializa o monitor de temperatura"""
+        try:
+            self.temp_monitor = MonitorCPU()
+            self.temp_running = True
+            self.temp_thread = threading.Thread(target=self.update_temperature, daemon=True)
+            self.temp_thread.start()
+        except Exception as e:
+            print(f"⚠️ Não foi possível inicializar monitor: {e}")
+            self.cpu_temp.set("CPU Temp: N/A")
+
+    def update_temperature(self):
+        """Thread que atualiza a temperatura constantemente"""
+        while self.temp_running:
+            try:
+                temp = self.temp_monitor.get_cpu_temperature()
+                if temp:
+                    # Definir cor baseada na temperatura
+                    if temp < 60:
+                        color = "green"
+                        status = "🟢"
+                    elif temp < 80:
+                        color = "orange"
+                        status = "🟡"
+                    else:
+                        color = "#FF4444"
+                        status = "🔴"
+
+                    self.cpu_temp.set(f"CPU Temp: {temp:.1f}°C {status}")
+                    self.temp_label.config(foreground=color)
+                else:
+                    self.cpu_temp.set("CPU Temp: --°C")
+            except Exception as e:
+                self.cpu_temp.set("CPU Temp: Error")
+
+            time.sleep(1)
 
     def build_ui(self):
         frame = ttk.Frame(self.root, padding=10)
@@ -44,7 +103,13 @@ class SystemStressApp:
         self.stop_button.grid(row=2, column=1, pady=10)
 
         ttk.Label(frame, textvariable=self.status_text, foreground="blue").grid(row=3, column=0, columnspan=5)
-        ttk.Label(frame, textvariable=self.time_left, font=("Arial", 12, "bold"), foreground="red").grid(row=4, column=0, columnspan=5)
+        ttk.Label(frame, textvariable=self.time_left, font=("Arial", 12, "bold"), foreground="red").grid(row=4,
+                                                                                                         column=0,
+                                                                                                         columnspan=5)
+
+        # Label de temperatura
+        self.temp_label = ttk.Label(frame, textvariable=self.cpu_temp, font=("Arial", 14, "bold"))
+        self.temp_label.grid(row=5, column=0, columnspan=5, pady=10)
 
     def start_test(self):
         duration = self.hours.get() * 3600 + self.minutes.get() * 60
@@ -108,3 +173,12 @@ class SystemStressApp:
         self.stop_button.config(state="disabled")
         self.status_text.set("Stopped.")
         messagebox.showinfo("System Stress", "O teste foi concluído!")
+
+    def __del__(self):
+        """Cleanup ao fechar o app"""
+        self.temp_running = False
+        if self.temp_monitor:
+            try:
+                self.temp_monitor.close_monitor()
+            except:
+                pass
