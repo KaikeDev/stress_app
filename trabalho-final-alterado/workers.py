@@ -6,11 +6,10 @@ import random
 
 def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
     """
-    Teste de estabilidade e carga total da CPU.
     - Executa cálculos intensos com ponto flutuante e inteiros.
     - Mantém verificações periódicas de integridade numérica.
     """
-    # Usa o ID do processo como semente para gerar resultados determinísticos
+    # Usa o ID do processo como semente
     seed = worker_id
     random.seed(seed)
 
@@ -22,8 +21,7 @@ def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
 
     # Pré-carrega senos
     values = [math.sin(i) for i in range(1_000)]
-
-    # Loop principal 
+ 
     while not stop_event.is_set():
        
         for _ in range(validation_interval):
@@ -43,10 +41,9 @@ def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
 def disk_worker(stop_event: mp.Event, file_path="disk_stress.tmp", block_size=4096, file_size_mb=1024):
     """
     Estressa o disco com operações aleatórias de leitura/escrita.
-    Cria um arquivo temporário grande e acessa posições aleatórias continuamente.
 
     Como no windows não é possivel acessar um setor, estamos acessando posições dentro de um arquivo
-    que está dentro do sistema de arquivos (NTFS, FAT32, etc.)
+    que está dentro do sistema de arquivos
     """
     size = file_size_mb * 1024 * 1024  # MB para bytes
 
@@ -74,7 +71,7 @@ def disk_worker(stop_event: mp.Event, file_path="disk_stress.tmp", block_size=40
             f.flush()
             os.fsync(f.fileno())
 
-            # só valida se foi realmente escrito
+            # só valida a leitura
             f.seek(pos)
             if f.read(block_size) != data:
                 print(f"[DISK] Falha de integridade em posição {pos}")
@@ -99,11 +96,11 @@ def ram_stress_worker(stop_event: mp.Event, block_size_mb=500, num_blocks=10):
         # Escolhe um bloco aleatório
         b = random.choice(blocks)
 
-        # Escolhe uma posição aleatória dentro desse bloco
+        # Escolhe uma posição aleatória
         pos = random.randint(0, len(b) - 1)
 
         # Altera o byte
-        b[pos] = (b[pos] + 1) % 256  # altera um byte
+        b[pos] = (b[pos] + 1) % 256 # 256 para manter o valor entre 0 e 255
 
         ops += 1
         # Exibe a cada 1 milhão de operações
