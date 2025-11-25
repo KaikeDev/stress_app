@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import multiprocessing as mp
 from workers import cpu_burn_worker, ram_stress_worker, disk_worker
+import psutil
 
 class SystemStressApp:
     def __init__(self, root):
@@ -38,6 +39,11 @@ class SystemStressApp:
         ttk.Checkbutton(frame, text="RAM", variable=self.stress_ram).grid(row=1, column=1)
         ttk.Checkbutton(frame, text="Disk", variable=self.stress_disk).grid(row=1, column=2)
 
+        self.allowed_cpus = list(range(mp.cpu_count()))
+
+        self.aff_button = ttk.Button(frame, text="Selecionar CPUs...", command=self.show_cpu_selector)
+        self.aff_button.grid(row=2, column=2, pady=10)
+
         self.start_button = ttk.Button(frame, text="Start", command=self.start_test)
         self.start_button.grid(row=2, column=0, pady=10)
         self.stop_button = ttk.Button(frame, text="Stop", command=self.stop_test, state="disabled")
@@ -45,6 +51,28 @@ class SystemStressApp:
 
         ttk.Label(frame, textvariable=self.status_text, foreground="blue").grid(row=3, column=0, columnspan=5)
         ttk.Label(frame, textvariable=self.time_left, font=("Arial", 12, "bold"), foreground="red").grid(row=4, column=0, columnspan=5)
+
+    def show_cpu_selector(self):
+        win = tk.Toplevel(self.root)
+        win.title("Selecionar CPUs")
+        win.grab_set()
+
+        self.cpu_vars = []
+
+        for i in range(mp.cpu_count()):
+            var = tk.BooleanVar(value=(i in self.allowed_cpus))
+            chk = ttk.Checkbutton(win, text=f"CPU {i}", variable=var)
+            chk.grid(row=i, column=0, sticky="w")
+            self.cpu_vars.append(var)
+
+        def save_and_close():
+            self.allowed_cpus = [i for i, v in enumerate(self.cpu_vars) if v.get()]
+            if not self.allowed_cpus:
+                messagebox.showerror("Erro", "Selecione pelo menos uma CPU.")
+                return
+            win.destroy()
+
+        ttk.Button(win, text="Salvar", command=save_and_close).grid(row=mp.cpu_count()+1, column=0, pady=10)
 
     def start_test(self):
         duration = self.hours.get() * 3600 + self.minutes.get() * 60
@@ -62,11 +90,15 @@ class SystemStressApp:
         self.running = True
         self.update_timer()
 
-        # CPU: um worker por núcleo
+        # CPU
         if self.stress_cpu.get():
-            for i in range(mp.cpu_count()):
-                p = mp.Process(target=cpu_burn_worker, args=(self.stop_event, i), daemon=True)
+            for core_index, core_id in enumerate(self.allowed_cpus):
+                p = mp.Process(target=cpu_burn_worker, args=(self.stop_event, core_index), daemon=True)
                 p.start()
+
+                psproc = psutil.Process(p.pid)
+                psproc.cpu_affinity([core_id])
+
                 self.processes.append(p)
 
         # RAM
