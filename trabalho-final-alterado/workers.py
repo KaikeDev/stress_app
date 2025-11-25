@@ -9,9 +9,6 @@ def cpu_burn_worker(stop_event: mp.Event, worker_id: int):
     - Executa cálculos intensos com ponto flutuante e inteiros.
     - Mantém verificações periódicas de integridade numérica.
     """
-    # Usa o ID do processo como semente
-    seed = worker_id
-    random.seed(seed)
 
     # Valor base esperado — (instabilidade)
     expected = 0.123456789
